@@ -15,9 +15,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.ui.Model;
-import org.springframework.util.ObjectUtils;
+import org.springframework.util.CollectionUtils;
 
 import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * @author : kl
@@ -32,6 +37,13 @@ public class MediaFilePreviewImpl implements FilePreview {
     private final FileHandlerService fileHandlerService;
     private final OtherFilePreviewImpl otherFilePreview;
     private static final String mp4 = "mp4";
+
+    // 添加线程池管理视频转换任务
+    private static final ExecutorService videoConversionExecutor =
+            Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+
+    // 添加转换任务缓存，避免重复转换
+    private static final Map<String, Future<String>> conversionTasks = new HashMap<>();
 
     public MediaFilePreviewImpl(FileHandlerService fileHandlerService, OtherFilePreviewImpl otherFilePreview) {
         this.fileHandlerService = fileHandlerService;
@@ -54,6 +66,7 @@ public class MediaFilePreviewImpl implements FilePreview {
                 break;
             }
         }
+
         if (!url.toLowerCase().startsWith("http") || checkNeedConvert(mediaTypes)) {  //不是http协议的 //   开启转换方式并是支持转换格式的
             if (forceUpdatedCache || !fileHandlerService.listConvertedFiles().containsKey(cacheName) || !ConfigConstants.isCacheEnabled()) {  //查询是否开启缓存
                 ReturnResponse<String> response = DownloadUtils.downLoad(fileAttribute, fileName);
@@ -64,12 +77,26 @@ public class MediaFilePreviewImpl implements FilePreview {
                 String convertedUrl = null;
                 try {
                     if (mediaTypes) {
-                        convertedUrl = convertToMp4(filePath, outFilePath, fileAttribute);
+                        // 检查是否已有正在进行的转换任务
+                        Future<String> conversionTask = conversionTasks.get(cacheName);
+                        if (conversionTask != null && !conversionTask.isDone()) {
+                            // 等待现有转换任务完成
+                            convertedUrl = conversionTask.get();
+                        } else {
+                            // 提交新的转换任务
+                            conversionTask = videoConversionExecutor.submit(() -> {
+                                return convertToMp4(filePath, outFilePath, fileAttribute);
+                            });
+                            conversionTasks.put(cacheName, conversionTask);
+                            convertedUrl = conversionTask.get();
+                        }
                     } else {
                         convertedUrl = outFilePath;  //其他协议的  不需要转换方式的文件 直接输出
                     }
                 } catch (Exception e) {
                     logger.error("Failed to convert media file: {}", filePath, e);
+                    // 清理失败的任务
+                    conversionTasks.remove(cacheName);
                 }
                 if (convertedUrl == null) {
                     return otherFilePreview.notSupportedFile(model, fileAttribute, "视频转换异常，请联系管理员");
@@ -78,6 +105,8 @@ public class MediaFilePreviewImpl implements FilePreview {
                     // 加入缓存
                     fileHandlerService.addConvertedFile(cacheName, fileHandlerService.getRelativePath(outFilePath));
                 }
+                // 转换完成后清理任务缓存
+                conversionTasks.remove(cacheName);
                 model.addAttribute("mediaUrl", fileHandlerService.getRelativePath(outFilePath));
             } else {
                 model.addAttribute("mediaUrl", fileHandlerService.listConvertedFiles().get(cacheName));
@@ -105,8 +134,7 @@ public class MediaFilePreviewImpl implements FilePreview {
     }
 
     private static String convertToMp4(String filePath, String outFilePath, FileAttribute fileAttribute) throws Exception {
-        FFmpegFrameGrabber frameGrabber = FFmpegFrameGrabber.createDefault(filePath);
-        Frame captured_frame;
+        FFmpegFrameGrabber frameGrabber = null;
         FFmpegFrameRecorder recorder = null;
         try {
             File desFile = new File(outFilePath);
@@ -114,6 +142,7 @@ public class MediaFilePreviewImpl implements FilePreview {
             if (desFile.exists()) {
                 return outFilePath;
             }
+
             if (fileAttribute.isCompressFile()) { //判断 是压缩包的创建新的目录
                 int index = outFilePath.lastIndexOf("/");  //截取最后一个斜杠的前面的内容
                 String folder = outFilePath.substring(0, index);
@@ -123,45 +152,144 @@ public class MediaFilePreviewImpl implements FilePreview {
                     path.mkdirs();
                 }
             }
+
+            frameGrabber = FFmpegFrameGrabber.createDefault(filePath);
             frameGrabber.start();
-            recorder = new FFmpegFrameRecorder(outFilePath, frameGrabber.getImageWidth(), frameGrabber.getImageHeight(), frameGrabber.getAudioChannels());
-            // recorder.setImageHeight(640);
-            // recorder.setImageWidth(480);
+
+            // 优化：使用更快的编码预设
+            recorder = new FFmpegFrameRecorder(outFilePath,
+                    frameGrabber.getImageWidth(),
+                    frameGrabber.getImageHeight(),
+                    frameGrabber.getAudioChannels());
+
+            // 设置快速编码参数
             recorder.setFormat(mp4);
             recorder.setFrameRate(frameGrabber.getFrameRate());
             recorder.setSampleRate(frameGrabber.getSampleRate());
-            //视频编码属性配置 H.264 H.265 MPEG
+
+            // 视频编码属性配置 - 使用快速编码预设
             recorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
-            //设置视频比特率,单位:b
+            recorder.setVideoOption("preset", "veryfast");  // 添加快速编码预设
+            recorder.setVideoOption("tune", "zerolatency"); // 降低延迟
             recorder.setVideoBitrate(frameGrabber.getVideoBitrate());
             recorder.setAspectRatio(frameGrabber.getAspectRatio());
-            // 设置音频通用编码格式
+
+            // 音频编码设置
             recorder.setAudioCodec(avcodec.AV_CODEC_ID_AAC);
-            //设置音频比特率,单位:b (比特率越高，清晰度/音质越好，当然文件也就越大 128000 = 182kb)
             recorder.setAudioBitrate(frameGrabber.getAudioBitrate());
-            recorder.setAudioOptions(frameGrabber.getAudioOptions());
             recorder.setAudioChannels(frameGrabber.getAudioChannels());
+
+            // 优化：当源文件已经是h264/aac编码时，尝试直接复制流
+            if (isCompatibleCodec(frameGrabber)) {
+                recorder.setVideoOption("c:v", "copy");
+                recorder.setAudioOption("c:a", "copy");
+            }
+
             recorder.start();
+
+            // 批量处理帧，提高处理效率
+            Frame capturedFrame;
+            int batchSize = 100; // 批量处理的帧数
+            int frameCount = 0;
+            Frame[] frameBatch = new Frame[batchSize];
+
             while (true) {
-                captured_frame = frameGrabber.grabFrame();
-                if (captured_frame == null) {
-                    System.out.println("转码完成:" + filePath);
+                capturedFrame = frameGrabber.grabFrame();
+                if (capturedFrame == null) {
                     break;
                 }
-                recorder.record(captured_frame);
+
+                frameBatch[frameCount % batchSize] = capturedFrame;
+                frameCount++;
+
+                // 批量记录帧
+                if (frameCount % batchSize == 0 || capturedFrame == null) {
+                    for (int i = 0; i < Math.min(batchSize, frameCount); i++) {
+                        if (frameBatch[i] != null) {
+                            recorder.record(frameBatch[i]);
+                            frameBatch[i] = null; // 释放引用
+                        }
+                    }
+                }
             }
+
+            // 记录剩余的帧
+            for (int i = 0; i < frameBatch.length; i++) {
+                if (frameBatch[i] != null) {
+                    recorder.record(frameBatch[i]);
+                }
+            }
+
+            logger.info("视频转码完成: {} -> {}", filePath, outFilePath);
+            return outFilePath;
+
         } catch (Exception e) {
             logger.error("Failed to convert video file to mp4: {}", filePath, e);
-            return null;
-        } finally {
-            if (recorder != null) {   //关闭
-                recorder.stop();
-                recorder.close();
+            // 删除可能已创建的失败文件
+            try {
+                File failedFile = new File(outFilePath);
+                if (failedFile.exists()) {
+                    failedFile.delete();
+                }
+            } catch (SecurityException ex) {
+                logger.warn("无法删除失败的转换文件: {}", outFilePath, ex);
             }
-            frameGrabber.stop();
-            frameGrabber.close();
+            throw e;
+        } finally {
+            // 确保资源被正确释放
+            if (recorder != null) {
+                try {
+                    recorder.stop();
+                    recorder.close();
+                } catch (Exception e) {
+                    logger.warn("关闭recorder时发生异常", e);
+                }
+            }
+            if (frameGrabber != null) {
+                try {
+                    frameGrabber.stop();
+                    frameGrabber.close();
+                } catch (Exception e) {
+                    logger.warn("关闭frameGrabber时发生异常", e);
+                }
+            }
+
+            // 强制垃圾回收，释放FFmpeg相关资源
+            System.gc();
         }
-        return outFilePath;
     }
 
+    /**
+     * 检查源文件是否已经是兼容的编码格式（H264/AAC）
+     */
+    private static boolean isCompatibleCodec(FFmpegFrameGrabber grabber) {
+        try {
+            String videoCodec = grabber.getVideoCodecName();
+            String audioCodec = grabber.getAudioCodecName();
+
+            boolean videoCompatible = videoCodec != null &&
+                    (videoCodec.toLowerCase().contains("h264") ||
+                            videoCodec.toLowerCase().contains("h.264"));
+
+            boolean audioCompatible = audioCodec != null &&
+                    (audioCodec.toLowerCase().contains("aac") ||
+                            audioCodec.toLowerCase().contains("mp3"));
+
+            return videoCompatible && audioCompatible;
+        } catch (Exception e) {
+            logger.debug("无法获取编解码器信息", e);
+            return false;
+        }
+    }
+
+    /**
+     * 清理所有转换任务（应用关闭时调用）
+     */
+    public static void shutdown() {
+        if (!CollectionUtils.isEmpty(conversionTasks)) {
+            conversionTasks.values().forEach(task -> task.cancel(true));
+            conversionTasks.clear();
+        }
+        videoConversionExecutor.shutdownNow();
+    }
 }

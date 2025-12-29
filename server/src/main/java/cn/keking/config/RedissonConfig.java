@@ -2,6 +2,8 @@ package cn.keking.config;
 
 import io.netty.channel.nio.NioEventLoopGroup;
 import org.apache.commons.lang3.StringUtils;
+import org.redisson.Redisson;
+import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.Codec;
 import org.redisson.config.Config;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
@@ -11,42 +13,123 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.util.ClassUtils;
 
 /**
+ * Redisson 客户端配置
  * Created by kl on 2017/09/26.
- * redisson 客户端配置
  */
 @ConditionalOnExpression("'${cache.type:default}'.equals('redis')")
 @ConfigurationProperties(prefix = "spring.redisson")
 @Configuration
 public class RedissonConfig {
 
-    private String address;
-    private int connectionMinimumIdleSize = 10;
-    private int idleConnectionTimeout=10000;
-    private int pingTimeout=1000;
-    private int connectTimeout=10000;
-    private int timeout=3000;
-    private int retryAttempts=3;
-    private int retryInterval=1500;
-    private int reconnectionTimeout=3000;
-    private int failedAttempts=3;
-    private String password = null;
-    private int subscriptionsPerConnection=5;
-    private String clientName=null;
-    private int subscriptionConnectionMinimumIdleSize = 1;
-    private int subscriptionConnectionPoolSize = 50;
-    private int connectionPoolSize = 64;
-    private int database = 0;
-    private boolean dnsMonitoring = false;
-    private int dnsMonitoringInterval = 5000;
+    // ========================== 连接配置 ==========================
+    private static String address;
+    private static String password;
+    private static String clientName;
+    private static int database = 0;
+    private static String mode = "single";
+    private static String masterName = "kkfile";
 
-    private int thread; //当前处理核数量 * 2
+    // ========================== 超时配置 ==========================
+    private static int idleConnectionTimeout = 10000;
+    private static int connectTimeout = 10000;
+    private static int timeout = 3000;
 
-    private String codec="org.redisson.codec.JsonJacksonCodec";
+    // ========================== 重试配置 ==========================
+    private static int retryAttempts = 3;
+    private static int retryInterval = 1500;
+
+    // ========================== 连接池配置 ==========================
+    private static int connectionMinimumIdleSize = 10;
+    private static int connectionPoolSize = 64;
+    private static int subscriptionsPerConnection = 5;
+    private static int subscriptionConnectionMinimumIdleSize = 1;
+    private static int subscriptionConnectionPoolSize = 50;
+
+    // ========================== 其他配置 ==========================
+    private static int dnsMonitoringInterval = 5000;
+    private static int thread; // 当前处理核数量 * 2
+    private static String codec = "org.redisson.codec.JsonJacksonCodec";
 
     @Bean
-    Config config() throws Exception {
+    public static RedissonClient config() throws Exception {
         Config config = new Config();
-        config.useSingleServer().setAddress(address)
+
+        // 密码处理
+        if (StringUtils.isBlank(password)) {
+            password = null;
+        }
+
+        // 根据模式创建对应的 Redisson 配置
+        switch (mode) {
+            case "cluster":
+                configureClusterMode(config);
+                break;
+            case "master-slave":
+                configureMasterSlaveMode(config);
+                break;
+            case "sentinel":
+                configureSentinelMode(config);
+                break;
+            default:
+                configureSingleMode(config);
+                break;
+        }
+
+        return Redisson.create(config);
+    }
+
+    // ========================== 配置方法 ==========================
+
+    /**
+     * 配置集群模式
+     */
+    private static void configureClusterMode(Config config) {
+        String[] clusterAddresses = address.split(",");
+        config.useClusterServers()
+                .setScanInterval(2000)
+                .addNodeAddress(clusterAddresses)
+                .setPassword(password)
+                .setRetryAttempts(retryAttempts)
+                .setTimeout(timeout)
+                .setMasterConnectionPoolSize(100)
+                .setSlaveConnectionPoolSize(100);
+    }
+
+    /**
+     * 配置主从模式
+     */
+    private static void configureMasterSlaveMode(Config config) {
+        String[] masterSlaveAddresses = address.split(",");
+        validateMasterSlaveAddresses(masterSlaveAddresses);
+
+        String[] slaveAddresses = new String[masterSlaveAddresses.length - 1];
+        System.arraycopy(masterSlaveAddresses, 1, slaveAddresses, 0, slaveAddresses.length);
+
+        config.useMasterSlaveServers()
+                .setDatabase(database)
+                .setPassword(password)
+                .setMasterAddress(masterSlaveAddresses[0])
+                .addSlaveAddress(slaveAddresses);
+    }
+
+    /**
+     * 配置哨兵模式
+     */
+    private static void configureSentinelMode(Config config) {
+        String[] sentinelAddresses = address.split(",");
+        config.useSentinelServers()
+                .setDatabase(database)
+                .setPassword(password)
+                .setMasterName(masterName)
+                .addSentinelAddress(sentinelAddresses);
+    }
+
+    /**
+     * 配置单机模式
+     */
+    private static void configureSingleMode(Config config) throws Exception {
+        config.useSingleServer()
+                .setAddress(address)
                 .setConnectionMinimumIdleSize(connectionMinimumIdleSize)
                 .setConnectionPoolSize(connectionPoolSize)
                 .setDatabase(database)
@@ -61,91 +144,35 @@ public class RedissonConfig {
                 .setConnectTimeout(connectTimeout)
                 .setIdleConnectionTimeout(idleConnectionTimeout)
                 .setPassword(StringUtils.trimToNull(password));
-        Codec codec=(Codec) ClassUtils.forName(getCodec(), ClassUtils.getDefaultClassLoader()).newInstance();
-        config.setCodec(codec);
+
+        // 设置编码器
+        Class<?> codecClass = ClassUtils.forName(getCodec(), ClassUtils.getDefaultClassLoader());
+        Codec codecInstance = (Codec) codecClass.getDeclaredConstructor().newInstance();
+        config.setCodec(codecInstance);
+        // 设置线程和事件循环组
         config.setThreads(thread);
         config.setEventLoopGroup(new NioEventLoopGroup());
-        return config;
     }
 
-    public int getThread() {
-        return thread;
+    /**
+     * 验证主从模式地址
+     */
+    private static void validateMasterSlaveAddresses(String[] addresses) {
+        if (addresses.length == 1) {
+            throw new IllegalArgumentException(
+                    "redis.redisson.address MUST have multiple redis addresses for master-slave mode.");
+        }
     }
 
-    public void setThread(int thread) {
-        this.thread = thread;
-    }
+    // ========================== Getter和Setter方法 ==========================
 
+    // 连接配置
     public String getAddress() {
         return address;
     }
 
     public void setAddress(String address) {
-        this.address = address;
-    }
-
-    public int getIdleConnectionTimeout() {
-        return idleConnectionTimeout;
-    }
-
-    public void setIdleConnectionTimeout(int idleConnectionTimeout) {
-        this.idleConnectionTimeout = idleConnectionTimeout;
-    }
-
-    public int getPingTimeout() {
-        return pingTimeout;
-    }
-
-    public void setPingTimeout(int pingTimeout) {
-        this.pingTimeout = pingTimeout;
-    }
-
-    public int getConnectTimeout() {
-        return connectTimeout;
-    }
-
-    public void setConnectTimeout(int connectTimeout) {
-        this.connectTimeout = connectTimeout;
-    }
-
-    public int getTimeout() {
-        return timeout;
-    }
-
-    public void setTimeout(int timeout) {
-        this.timeout = timeout;
-    }
-
-    public int getRetryAttempts() {
-        return retryAttempts;
-    }
-
-    public void setRetryAttempts(int retryAttempts) {
-        this.retryAttempts = retryAttempts;
-    }
-
-    public int getRetryInterval() {
-        return retryInterval;
-    }
-
-    public void setRetryInterval(int retryInterval) {
-        this.retryInterval = retryInterval;
-    }
-
-    public int getReconnectionTimeout() {
-        return reconnectionTimeout;
-    }
-
-    public void setReconnectionTimeout(int reconnectionTimeout) {
-        this.reconnectionTimeout = reconnectionTimeout;
-    }
-
-    public int getFailedAttempts() {
-        return failedAttempts;
-    }
-
-    public void setFailedAttempts(int failedAttempts) {
-        this.failedAttempts = failedAttempts;
+        RedissonConfig.address = address;
     }
 
     public String getPassword() {
@@ -153,15 +180,7 @@ public class RedissonConfig {
     }
 
     public void setPassword(String password) {
-        this.password = password;
-    }
-
-    public int getSubscriptionsPerConnection() {
-        return subscriptionsPerConnection;
-    }
-
-    public void setSubscriptionsPerConnection(int subscriptionsPerConnection) {
-        this.subscriptionsPerConnection = subscriptionsPerConnection;
+        RedissonConfig.password = password;
     }
 
     public String getClientName() {
@@ -169,39 +188,7 @@ public class RedissonConfig {
     }
 
     public void setClientName(String clientName) {
-        this.clientName = clientName;
-    }
-
-    public int getSubscriptionConnectionMinimumIdleSize() {
-        return subscriptionConnectionMinimumIdleSize;
-    }
-
-    public void setSubscriptionConnectionMinimumIdleSize(int subscriptionConnectionMinimumIdleSize) {
-        this.subscriptionConnectionMinimumIdleSize = subscriptionConnectionMinimumIdleSize;
-    }
-
-    public int getSubscriptionConnectionPoolSize() {
-        return subscriptionConnectionPoolSize;
-    }
-
-    public void setSubscriptionConnectionPoolSize(int subscriptionConnectionPoolSize) {
-        this.subscriptionConnectionPoolSize = subscriptionConnectionPoolSize;
-    }
-
-    public int getConnectionMinimumIdleSize() {
-        return connectionMinimumIdleSize;
-    }
-
-    public void setConnectionMinimumIdleSize(int connectionMinimumIdleSize) {
-        this.connectionMinimumIdleSize = connectionMinimumIdleSize;
-    }
-
-    public int getConnectionPoolSize() {
-        return connectionPoolSize;
-    }
-
-    public void setConnectionPoolSize(int connectionPoolSize) {
-        this.connectionPoolSize = connectionPoolSize;
+        RedissonConfig.clientName = clientName;
     }
 
     public int getDatabase() {
@@ -209,30 +196,130 @@ public class RedissonConfig {
     }
 
     public void setDatabase(int database) {
-        this.database = database;
+        RedissonConfig.database = database;
     }
 
-    public boolean isDnsMonitoring() {
-        return dnsMonitoring;
+    public static String getMode() {
+        return mode;
     }
 
-    public void setDnsMonitoring(boolean dnsMonitoring) {
-        this.dnsMonitoring = dnsMonitoring;
+    public void setMode(String mode) {
+        RedissonConfig.mode = mode;
     }
 
+    public static String getMasterNamee() {
+        return masterName;
+    }
+
+    public void setMasterNamee(String masterName) {
+        RedissonConfig.masterName = masterName;
+    }
+
+    // 超时配置
+    public int getIdleConnectionTimeout() {
+        return idleConnectionTimeout;
+    }
+
+    public void setIdleConnectionTimeout(int idleConnectionTimeout) {
+        RedissonConfig.idleConnectionTimeout = idleConnectionTimeout;
+    }
+
+    public int getConnectTimeout() {
+        return connectTimeout;
+    }
+
+    public void setConnectTimeout(int connectTimeout) {
+        RedissonConfig.connectTimeout = connectTimeout;
+    }
+
+    public int getTimeout() {
+        return timeout;
+    }
+
+    public void setTimeout(int timeout) {
+        RedissonConfig.timeout = timeout;
+    }
+
+    // 重试配置
+    public int getRetryAttempts() {
+        return retryAttempts;
+    }
+
+    public void setRetryAttempts(int retryAttempts) {
+        RedissonConfig.retryAttempts = retryAttempts;
+    }
+
+    public int getRetryInterval() {
+        return retryInterval;
+    }
+
+    public void setRetryInterval(int retryInterval) {
+        RedissonConfig.retryInterval = retryInterval;
+    }
+
+    // 连接池配置
+    public int getConnectionMinimumIdleSize() {
+        return connectionMinimumIdleSize;
+    }
+
+    public void setConnectionMinimumIdleSize(int connectionMinimumIdleSize) {
+        RedissonConfig.connectionMinimumIdleSize = connectionMinimumIdleSize;
+    }
+
+    public int getConnectionPoolSize() {
+        return connectionPoolSize;
+    }
+
+    public void setConnectionPoolSize(int connectionPoolSize) {
+        RedissonConfig.connectionPoolSize = connectionPoolSize;
+    }
+
+    public int getSubscriptionsPerConnection() {
+        return subscriptionsPerConnection;
+    }
+
+    public void setSubscriptionsPerConnection(int subscriptionsPerConnection) {
+        RedissonConfig.subscriptionsPerConnection = subscriptionsPerConnection;
+    }
+
+    public int getSubscriptionConnectionMinimumIdleSize() {
+        return subscriptionConnectionMinimumIdleSize;
+    }
+
+    public void setSubscriptionConnectionMinimumIdleSize(int subscriptionConnectionMinimumIdleSize) {
+        RedissonConfig.subscriptionConnectionMinimumIdleSize = subscriptionConnectionMinimumIdleSize;
+    }
+
+    public int getSubscriptionConnectionPoolSize() {
+        return subscriptionConnectionPoolSize;
+    }
+
+    public void setSubscriptionConnectionPoolSize(int subscriptionConnectionPoolSize) {
+        RedissonConfig.subscriptionConnectionPoolSize = subscriptionConnectionPoolSize;
+    }
+
+    // 其他配置
     public int getDnsMonitoringInterval() {
         return dnsMonitoringInterval;
     }
 
     public void setDnsMonitoringInterval(int dnsMonitoringInterval) {
-        this.dnsMonitoringInterval = dnsMonitoringInterval;
+        RedissonConfig.dnsMonitoringInterval = dnsMonitoringInterval;
     }
 
-    public String getCodec() {
+    public int getThread() {
+        return thread;
+    }
+
+    public void setThread(int thread) {
+        RedissonConfig.thread = thread;
+    }
+
+    public static String getCodec() {
         return codec;
     }
 
     public void setCodec(String codec) {
-        this.codec = codec;
+        RedissonConfig.codec = codec;
     }
 }

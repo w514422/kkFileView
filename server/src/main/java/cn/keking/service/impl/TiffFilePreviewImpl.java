@@ -5,7 +5,7 @@ import cn.keking.model.FileAttribute;
 import cn.keking.model.ReturnResponse;
 import cn.keking.service.FileHandlerService;
 import cn.keking.service.FilePreview;
-import cn.keking.utils.ConvertPicUtil;
+import cn.keking.service.TifToService;
 import cn.keking.utils.DownloadUtils;
 import cn.keking.utils.KkFileUtils;
 import cn.keking.utils.WebUtils;
@@ -25,9 +25,11 @@ public class TiffFilePreviewImpl implements FilePreview {
 
     private final FileHandlerService fileHandlerService;
     private final OtherFilePreviewImpl otherFilePreview;
-    public TiffFilePreviewImpl(FileHandlerService fileHandlerService,OtherFilePreviewImpl otherFilePreview) {
+    private final TifToService tiftoservice;
+    public TiffFilePreviewImpl(FileHandlerService fileHandlerService,OtherFilePreviewImpl otherFilePreview,TifToService tiftoservice) {
         this.fileHandlerService = fileHandlerService;
         this.otherFilePreview = otherFilePreview;
+        this.tiftoservice = tiftoservice;
     }
     @Override
     public String filePreviewHandle(String url, Model model, FileAttribute fileAttribute) {
@@ -45,7 +47,7 @@ public class TiffFilePreviewImpl implements FilePreview {
                 String filePath = response.getContent();
                 if ("pdf".equalsIgnoreCase(tifPreviewType)) {
                     try {
-                       ConvertPicUtil.convertJpg2Pdf(filePath, outFilePath);
+                        tiftoservice.convertTif2Pdf(filePath, outFilePath);
                     } catch (Exception e) {
                         if (e.getMessage().contains("Bad endianness tag (not 0x4949 or 0x4d4d)") ) {
                             model.addAttribute("imgUrls", url);
@@ -69,7 +71,7 @@ public class TiffFilePreviewImpl implements FilePreview {
                     // 将tif转换为jpg，返回转换后的文件路径、文件名的list
                     List<String> listPic2Jpg;
                     try {
-                        listPic2Jpg = ConvertPicUtil.convertTif2Jpg(filePath, outFilePath,forceUpdatedCache);
+                        listPic2Jpg = tiftoservice.convertTif2Jpg(filePath, outFilePath,forceUpdatedCache);
                     } catch (Exception e) {
                         if (e.getMessage().contains("Bad endianness tag (not 0x4949 or 0x4d4d)") ) {
                             model.addAttribute("imgUrls", url);

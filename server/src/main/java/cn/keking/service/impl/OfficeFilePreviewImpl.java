@@ -6,6 +6,7 @@ import cn.keking.model.ReturnResponse;
 import cn.keking.service.FileHandlerService;
 import cn.keking.service.FilePreview;
 import cn.keking.service.OfficeToPdfService;
+import cn.keking.service.PdfToJpgService;
 import cn.keking.utils.DownloadUtils;
 import cn.keking.utils.KkFileUtils;
 import cn.keking.utils.OfficeUtils;
@@ -35,11 +36,13 @@ public class OfficeFilePreviewImpl implements FilePreview {
     private final FileHandlerService fileHandlerService;
     private final OfficeToPdfService officeToPdfService;
     private final OtherFilePreviewImpl otherFilePreview;
+    private final PdfToJpgService pdftojpgservice;
 
-    public OfficeFilePreviewImpl(FileHandlerService fileHandlerService, OfficeToPdfService officeToPdfService, OtherFilePreviewImpl otherFilePreview) {
+    public OfficeFilePreviewImpl(FileHandlerService fileHandlerService, OfficeToPdfService officeToPdfService, OtherFilePreviewImpl otherFilePreview, PdfToJpgService pdftojpgservice) {
         this.fileHandlerService = fileHandlerService;
         this.officeToPdfService = officeToPdfService;
         this.otherFilePreview = otherFilePreview;
+        this.pdftojpgservice = pdftojpgservice;
     }
 
     @Override
@@ -115,12 +118,12 @@ public class OfficeFilePreviewImpl implements FilePreview {
         return isHtmlView ? EXEL_FILE_PREVIEW_PAGE : PDF_FILE_PREVIEW_PAGE;
     }
 
-    static String getPreviewType(Model model, FileAttribute fileAttribute, String officePreviewType, String pdfName, String outFilePath, FileHandlerService fileHandlerService, String officePreviewTypeImage, OtherFilePreviewImpl otherFilePreview) {
+     String getPreviewType(Model model, FileAttribute fileAttribute, String officePreviewType, String pdfName, String outFilePath, FileHandlerService fileHandlerService, String officePreviewTypeImage, OtherFilePreviewImpl otherFilePreview) {
         String suffix = fileAttribute.getSuffix();
         boolean isPPT = suffix.equalsIgnoreCase("ppt") || suffix.equalsIgnoreCase("pptx");
         List<String> imageUrls = null;
         try {
-            imageUrls =  fileHandlerService.pdf2jpg(outFilePath,outFilePath, pdfName, fileAttribute);
+            imageUrls =  pdftojpgservice.pdf2jpg(outFilePath,outFilePath, pdfName, fileAttribute);
         } catch (Exception e) {
             Throwable[] throwableArray = ExceptionUtils.getThrowables(e);
             for (Throwable throwable : throwableArray) {

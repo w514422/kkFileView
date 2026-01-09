@@ -5,6 +5,7 @@ import cn.keking.model.FileAttribute;
 import cn.keking.model.ReturnResponse;
 import cn.keking.service.FileHandlerService;
 import cn.keking.service.FilePreview;
+import cn.keking.service.PdfToJpgService;
 import cn.keking.utils.DownloadUtils;
 import cn.keking.utils.WebUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -24,10 +25,12 @@ public class PdfFilePreviewImpl implements FilePreview {
 
     private final FileHandlerService fileHandlerService;
     private final OtherFilePreviewImpl otherFilePreview;
+    private final PdfToJpgService pdftojpgservice;
     private static final String PDF_PASSWORD_MSG = "password";
-    public PdfFilePreviewImpl(FileHandlerService fileHandlerService, OtherFilePreviewImpl otherFilePreview) {
+    public PdfFilePreviewImpl(FileHandlerService fileHandlerService, OtherFilePreviewImpl otherFilePreview, PdfToJpgService pdftojpgservice) {
         this.fileHandlerService = fileHandlerService;
         this.otherFilePreview = otherFilePreview;
+        this.pdftojpgservice = pdftojpgservice;
     }
     @Override
     public String filePreviewHandle(String url, Model model, FileAttribute fileAttribute) {
@@ -51,7 +54,7 @@ public class PdfFilePreviewImpl implements FilePreview {
             }
             List<String> imageUrls;
             try {
-                imageUrls = fileHandlerService.pdf2jpg(originFilePath,outFilePath, pdfName, fileAttribute);
+                imageUrls = pdftojpgservice.pdf2jpg(originFilePath,outFilePath, pdfName, fileAttribute);
             } catch (Exception e) {
                 Throwable[] throwableArray = ExceptionUtils.getThrowables(e);
                 for (Throwable throwable : throwableArray) {

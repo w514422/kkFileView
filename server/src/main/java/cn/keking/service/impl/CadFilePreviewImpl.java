@@ -3,6 +3,7 @@ package cn.keking.service.impl;
 import cn.keking.config.ConfigConstants;
 import cn.keking.model.FileAttribute;
 import cn.keking.model.ReturnResponse;
+import cn.keking.service.CadToPdfService;
 import cn.keking.service.FileHandlerService;
 import cn.keking.service.FilePreview;
 import cn.keking.utils.DownloadUtils;
@@ -15,7 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.ui.Model;
 import org.springframework.util.StringUtils;
 
-import static cn.keking.service.impl.OfficeFilePreviewImpl.getPreviewType;
 
 /**
  * @author chenjh
@@ -29,11 +29,15 @@ public class CadFilePreviewImpl implements FilePreview {
     private static final String OFFICE_PREVIEW_TYPE_ALL_IMAGES = "allImages";
 
     private final FileHandlerService fileHandlerService;
+    private final CadToPdfService cadtopdfservice;
     private final OtherFilePreviewImpl otherFilePreview;
+    private final OfficeFilePreviewImpl officefilepreviewimpl;
 
-    public CadFilePreviewImpl(FileHandlerService fileHandlerService, OtherFilePreviewImpl otherFilePreview) {
+    public CadFilePreviewImpl(FileHandlerService fileHandlerService, OtherFilePreviewImpl otherFilePreview, CadToPdfService cadtopdfservice,OfficeFilePreviewImpl officefilepreviewimpl ) {
         this.fileHandlerService = fileHandlerService;
         this.otherFilePreview = otherFilePreview;
+        this.cadtopdfservice = cadtopdfservice;
+        this.officefilepreviewimpl = officefilepreviewimpl;
     }
 
     @Override
@@ -53,14 +57,14 @@ public class CadFilePreviewImpl implements FilePreview {
                 return otherFilePreview.notSupportedFile(model, fileAttribute, response.getMsg());
             }
             String filePath = response.getContent();
-            String imageUrls = null;
+            boolean imageUrls = false;
             if (StringUtils.hasText(outFilePath)) {
                 try {
-                    imageUrls = fileHandlerService.cadToPdf(filePath, outFilePath, cadPreviewType, fileAttribute);
+                    imageUrls = cadtopdfservice.cadToPdf(filePath, outFilePath, cadPreviewType, fileAttribute);
                 } catch (Exception e) {
                     logger.error("Failed to convert CAD file: {}", filePath, e);
                 }
-                if (imageUrls == null) {
+                if (!imageUrls) {
                     return otherFilePreview.notSupportedFile(model, fileAttribute, "CAD转换异常，请联系管理员");
                 }
                 //是否保留CAD源文件
@@ -82,7 +86,7 @@ public class CadFilePreviewImpl implements FilePreview {
             return SVG_FILE_PREVIEW_PAGE;
         }
         if (baseUrl != null && (OFFICE_PREVIEW_TYPE_IMAGE.equals(officePreviewType) || OFFICE_PREVIEW_TYPE_ALL_IMAGES.equals(officePreviewType))) {
-            return getPreviewType(model, fileAttribute, officePreviewType, cacheName, outFilePath, fileHandlerService, OFFICE_PREVIEW_TYPE_IMAGE, otherFilePreview);
+            return officefilepreviewimpl.getPreviewType(model, fileAttribute, officePreviewType, cacheName, outFilePath, fileHandlerService, OFFICE_PREVIEW_TYPE_IMAGE, otherFilePreview);
         }
         model.addAttribute("pdfUrl", cacheName);
         return PDF_FILE_PREVIEW_PAGE;

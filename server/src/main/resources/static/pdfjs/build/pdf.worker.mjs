@@ -24,6 +24,7 @@
  * pdfjsVersion = 5.4.530
  * pdfjsBuild = 50cc4adac
  */
+import "../web/compatibility.mjs";
 /******/ var __webpack_modules__ = ({
 
 /***/ 34:

@@ -44,7 +44,6 @@ jobs:
     env:
       GITHUB_REPOSITORY_NAME: ${{ github.repository }}
       GITHUB_RUN_ID_VALUE: ${{ github.run_id }}
-      KK_DEPLOY_ARTIFACT_TOKEN: ${{ secrets.KK_DEPLOY_ARTIFACT_TOKEN }}
       KK_DEPLOY_HOST: ${{ secrets.KK_DEPLOY_HOST }}
       KK_DEPLOY_PORT: ${{ secrets.KK_DEPLOY_PORT }}
       KK_DEPLOY_USERNAME: ${{ secrets.KK_DEPLOY_USERNAME }}
@@ -67,10 +66,30 @@ jobs:
 
       - name: Validate deploy secrets
         run: |
-          test -n "$KK_DEPLOY_ARTIFACT_TOKEN" || (echo "Missing secret: KK_DEPLOY_ARTIFACT_TOKEN" && exit 1)
           test -n "$KK_DEPLOY_HOST" || (echo "Missing secret: KK_DEPLOY_HOST" && exit 1)
           test -n "$KK_DEPLOY_USERNAME" || (echo "Missing secret: KK_DEPLOY_USERNAME" && exit 1)
           test -n "$KK_DEPLOY_PASSWORD" || (echo "Missing secret: KK_DEPLOY_PASSWORD" && exit 1)
+
+      - name: Resolve artifact download URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          artifact_json=$(curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY_NAME/actions/runs/$GITHUB_RUN_ID_VALUE/artifacts")
+          artifact_id=$(ARTIFACT_JSON="$artifact_json" ARTIFACT_NAME="$KK_DEPLOY_ARTIFACT_NAME" python -c "import json, os; payload=json.loads(os.environ['ARTIFACT_JSON']); name=os.environ['ARTIFACT_NAME']; matches=[artifact for artifact in payload.get('artifacts', []) if artifact.get('name') == name]; matches or (_ for _ in ()).throw(SystemExit(f\"Artifact '{name}' not found for run\")); len(matches) == 1 or (_ for _ in ()).throw(SystemExit(f\"Expected one artifact named '{name}', found {len(matches)}\")); print(matches[0]['id'])")
+          headers_file=$(mktemp)
+          curl -fsS -D "$headers_file" -o /dev/null \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY_NAME/actions/artifacts/$artifact_id/zip"
+          artifact_url=$(awk 'BEGIN{IGNORECASE=1} /^location:/ { sub(/\r$/, "", $0); print substr($0, index($0, ":") + 2); exit }' "$headers_file")
+          test -n "$artifact_url" || (echo "Failed to resolve artifact download redirect URL" && exit 1)
+          rm -f "$headers_file"
+          echo "KK_DEPLOY_ARTIFACT_URL=$artifact_url" >> "$GITHUB_ENV"
 
       - name: Deploy to Windows server
         run: python .github/scripts/deploy_windows_winrm.py

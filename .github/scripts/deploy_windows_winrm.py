@@ -31,10 +31,7 @@ def main() -> int:
     password = require_env("KK_DEPLOY_PASSWORD")
     deploy_root = optional_env("KK_DEPLOY_ROOT", r"C:\kkFileView-5.0")
     health_url = optional_env("KK_DEPLOY_HEALTH_URL", "http://127.0.0.1:8012/")
-    artifact_name = optional_env("KK_DEPLOY_ARTIFACT_NAME", "kkfileview-server-jar")
-    repository = require_env("GITHUB_REPOSITORY_NAME")
-    run_id = require_env("GITHUB_RUN_ID_VALUE")
-    artifact_token = require_env("KK_DEPLOY_ARTIFACT_TOKEN")
+    artifact_url = require_env("KK_DEPLOY_ARTIFACT_URL")
     dry_run = optional_env("KK_DEPLOY_DRY_RUN", "false").lower()
 
     script_path = pathlib.Path(__file__).with_name("remote_windows_deploy.ps1")
@@ -77,16 +74,17 @@ $ErrorActionPreference = 'Stop'
 $raw = Get-Content -LiteralPath '{ps_quote(remote_b64_path)}' -Raw
 [System.IO.File]::WriteAllBytes('{ps_quote(remote_ps1_path)}', [Convert]::FromBase64String($raw))
 try {{
+  $env:KK_DEPLOY_ARTIFACT_URL = '{ps_quote(artifact_url)}'
+  $env:KK_DEPLOY_ROOT = '{ps_quote(deploy_root)}'
+  $env:KK_DEPLOY_HEALTH_URL = '{ps_quote(health_url)}'
+  $env:KK_DEPLOY_DRY_RUN = '{ps_quote(dry_run)}'
   powershell -NoProfile -ExecutionPolicy Bypass -File '{ps_quote(remote_ps1_path)}' `
-    -Repository '{ps_quote(repository)}' `
-    -RunId '{ps_quote(run_id)}' `
-    -ArtifactName '{ps_quote(artifact_name)}' `
-    -GitHubToken '{ps_quote(artifact_token)}' `
-    -DeployRoot '{ps_quote(deploy_root)}' `
-    -HealthUrl '{ps_quote(health_url)}' `
-    -DryRun '{ps_quote(dry_run)}'
   $code = $LASTEXITCODE
 }} finally {{
+  Remove-Item Env:KK_DEPLOY_ARTIFACT_URL -ErrorAction SilentlyContinue
+  Remove-Item Env:KK_DEPLOY_ROOT -ErrorAction SilentlyContinue
+  Remove-Item Env:KK_DEPLOY_HEALTH_URL -ErrorAction SilentlyContinue
+  Remove-Item Env:KK_DEPLOY_DRY_RUN -ErrorAction SilentlyContinue
   Remove-Item '{ps_quote(remote_b64_path)}' -Force -ErrorAction SilentlyContinue
   Remove-Item '{ps_quote(remote_ps1_path)}' -Force -ErrorAction SilentlyContinue
 }}

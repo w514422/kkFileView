@@ -1,19 +1,39 @@
-param(
-    [Parameter(Mandatory = $true)][string]$Repository,
-    [Parameter(Mandatory = $true)][string]$RunId,
-    [Parameter(Mandatory = $true)][string]$ArtifactName,
-    [Parameter(Mandatory = $true)][string]$GitHubToken,
-    [Parameter(Mandatory = $true)][string]$DeployRoot,
-    [Parameter(Mandatory = $true)][string]$HealthUrl,
-    [string]$DryRun = 'false'
-)
-
 $ErrorActionPreference = 'Stop'
 
 function Write-Step {
     param([string]$Message)
     Write-Host "==> $Message"
 }
+
+function Get-RequiredEnv {
+    param([string]$Name)
+
+    $Value = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        throw "Missing required environment variable: $Name"
+    }
+
+    return $Value
+}
+
+function Get-OptionalEnv {
+    param(
+        [string]$Name,
+        [string]$DefaultValue
+    )
+
+    $Value = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $DefaultValue
+    }
+
+    return $Value
+}
+
+$ArtifactDownloadUrl = Get-RequiredEnv 'KK_DEPLOY_ARTIFACT_URL'
+$DeployRoot = Get-OptionalEnv 'KK_DEPLOY_ROOT' 'C:\kkFileView-5.0'
+$HealthUrl = Get-OptionalEnv 'KK_DEPLOY_HEALTH_URL' 'http://127.0.0.1:8012/'
+$DryRun = Get-OptionalEnv 'KK_DEPLOY_DRY_RUN' 'false'
 
 $BinDir = Join-Path $DeployRoot 'bin'
 $StartupScript = Join-Path $BinDir 'startup.bat'
@@ -63,33 +83,33 @@ if (Test-Path $ExtractDir) {
     Remove-Item $ExtractDir -Recurse -Force
 }
 
-$Headers = @{
-    Authorization = "Bearer $GitHubToken"
-    Accept = "application/vnd.github+json"
-    "X-GitHub-Api-Version" = "2022-11-28"
-    "User-Agent" = "kkFileView-auto-deploy"
+Write-Step 'Downloading workflow artifact via signed URL'
+$PreviousProgressPreference = $ProgressPreference
+$ProgressPreference = 'SilentlyContinue'
+try {
+    Invoke-WebRequest -Uri $ArtifactDownloadUrl -OutFile $ArtifactZip -UseBasicParsing -TimeoutSec 120
+} finally {
+    $ProgressPreference = $PreviousProgressPreference
 }
 
-$ArtifactsApi = "https://api.github.com/repos/$Repository/actions/runs/$RunId/artifacts"
-Write-Step "Resolving workflow artifact: $ArtifactName"
-$ArtifactsResponse = Invoke-RestMethod -Headers $Headers -Uri $ArtifactsApi -Method Get
-$Artifact = $ArtifactsResponse.artifacts | Where-Object { $_.name -eq $ArtifactName } | Select-Object -First 1
-
-if (-not $Artifact) {
-    throw "Artifact '$ArtifactName' not found for workflow run $RunId"
+if (-not (Test-Path $ArtifactZip)) {
+    throw "Artifact zip was not created: $ArtifactZip"
 }
 
-Write-Step "Downloading artifact from GitHub Actions"
-Invoke-WebRequest -Headers $Headers -Uri $Artifact.archive_download_url -OutFile $ArtifactZip
+$ArtifactZipInfo = Get-Item $ArtifactZip
+if ($ArtifactZipInfo.Length -le 0) {
+    throw "Downloaded artifact zip is empty: $ArtifactZip"
+}
+
 Expand-Archive -LiteralPath $ArtifactZip -DestinationPath $ExtractDir -Force
 
 $DownloadedJars = Get-ChildItem $ExtractDir -Filter 'kkFileView-*.jar' -Recurse
 if (-not $DownloadedJars) {
-    throw "No kkFileView jar found inside artifact '$ArtifactName'"
+    throw 'No kkFileView jar found inside downloaded workflow artifact'
 }
 
 if ($DownloadedJars.Count -ne 1) {
-    throw "Expected exactly one kkFileView jar inside artifact '$ArtifactName', found $($DownloadedJars.Count)"
+    throw "Expected exactly one kkFileView jar inside downloaded workflow artifact, found $($DownloadedJars.Count)"
 }
 
 $DownloadedJar = $DownloadedJars[0]

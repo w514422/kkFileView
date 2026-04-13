@@ -28,33 +28,19 @@ public class PdfViewerCompatibilityTests {
 
     @Test
     void shouldOpenPdfPreviewWithThumbnailSidebarByDefault() throws IOException {
-        String pdfTemplate = readWebResource("/web/pdf.ftl");
+        String pdfTemplate = readResource("/web/pdf.ftl");
 
         assertTrue(pdfTemplate.contains("#page=1&pagemode=thumbs"));
     }
 
     @Test
     void shouldPreferPdfForOfficePreviewByDefault() throws IOException {
-        String properties = readConfigResource("/application.properties");
+        String properties = readResource("/application.properties");
 
         assertTrue(properties.contains("office.preview.type = ${KK_OFFICE_PREVIEW_TYPE:pdf}"));
     }
 
     private String readResource(String resourcePath) throws IOException {
-        try (InputStream inputStream = getClass().getResourceAsStream(resourcePath)) {
-            assertNotNull(inputStream);
-            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-        }
-    }
-
-    private String readWebResource(String resourcePath) throws IOException {
-        try (InputStream inputStream = getClass().getResourceAsStream(resourcePath)) {
-            assertNotNull(inputStream);
-            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-        }
-    }
-
-    private String readConfigResource(String resourcePath) throws IOException {
         try (InputStream inputStream = getClass().getResourceAsStream(resourcePath)) {
             assertNotNull(inputStream);
             return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);

@@ -11,9 +11,13 @@
         body {
             background-color: #f1f3f5;
         }
-        .viewer-container:focus,
-        .viewer-container:focus-visible {
+        .viewer-container:focus {
             outline: none !important;
+        }
+        .viewer-container:focus-visible {
+            outline: 2px solid rgba(95, 107, 122, 0.65) !important;
+            outline-offset: 2px;
+            box-shadow: 0 0 0 4px rgba(95, 107, 122, 0.14);
         }
         #image { width: 800px; margin: 0 auto; font-size: 0;}
         #image li {  display: inline-block;width: 50px;height: 50px; margin-left: 1%; padding-top: 1%;}

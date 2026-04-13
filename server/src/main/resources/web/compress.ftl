@@ -779,6 +779,10 @@
         toggleTreePanelIconEl.textContent = collapsed ? ">" : "<";
     }
 
+    function isDirectoryNode(node) {
+        return !!node && Array.isArray(node.children);
+    }
+
     function countTreeStats(nodes) {
         var stats = { folders: 0, files: 0 };
         var queue = [].concat(nodes || []);
@@ -787,7 +791,7 @@
             if (!node) {
                 continue;
             }
-            if (node.children && node.children.length) {
+            if (isDirectoryNode(node)) {
                 stats.folders += 1;
                 queue = queue.concat(node.children);
             } else {
@@ -841,7 +845,8 @@
 
     function normalizeTreeNodes(nodes) {
         (nodes || []).forEach(function (node) {
-            if (node.children && node.children.length) {
+            if (isDirectoryNode(node)) {
+                node.isParent = true;
                 normalizeTreeNodes(node.children);
                 return;
             }
@@ -851,7 +856,7 @@
     }
 
     function decorateTreeNode(treeId, treeNode) {
-        if (treeNode.isParent) {
+        if (isDirectoryNode(treeNode)) {
             return;
         }
         var anchor = $("#" + treeNode.tId + "_a");
@@ -903,7 +908,7 @@
     }
 
     function handleNodeClick(event, treeId, treeNode) {
-        if (treeNode.isParent) {
+        if (isDirectoryNode(treeNode)) {
             zTreeObj.expandNode(treeNode, !treeNode.open, false, false, false);
             return false;
         }

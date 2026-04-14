@@ -68,19 +68,6 @@ URL：[https://file.kkview.cn](https://file.kkview.cn)
 ### Version 5.0.0 (April 14, 2026)
 
 #### Improvements
-1. Redesigned archive preview into a single workspace with a collapsible tree and inline file preview
-2. Improved archive preview file-type badges and single-image preview styling
-3. Added an agent-focused repository guide for engineering automation and maintenance
-
-#### Fixes
-1. Fixed archive-contained Office files that could stay stuck on loading because repeated extraction appended to existing files
-2. Default Office preview now prefers PDF mode, and PDF preview opens with the thumbnail sidebar visible by default
-3. Updated startup scripts to discover the packaged jar dynamically instead of relying on stale hard-coded jar names
-4. Updated Docker and release helper docs to align with the 5.0.0 release line
-
-### Version 5.0 (January 20, 2026)
-
-#### Optimizations
 1. Enhanced xlsx front-end parsing - Improved Excel file front-end rendering performance
 2. Optimized image parsing - Enhanced image processing mechanism
 3. Improved tif parsing - Enhanced TIF format support
@@ -89,6 +76,9 @@ URL：[https://file.kkview.cn](https://file.kkview.cn)
 6. Optimized ftp multi-client access - Improved FTP service compatibility
 7. Enhanced home page directory access - Implemented post server-side pagination mechanism
 8. Improved marked parsing - Enhanced Markdown rendering
+9. Redesigned archive preview into a single workspace with a collapsible tree and inline file preview
+10. Improved archive preview file-type badges and single-image preview styling
+11. Added an agent-focused repository guide for engineering automation and maintenance
 
 #### New Features
 1. msg email parsing - Added support for msg format email file preview
@@ -109,6 +99,10 @@ URL：[https://file.kkview.cn](https://file.kkview.cn)
 2. Security issues - Fixed security vulnerabilities
 3. Incomplete image watermark issues - Fixed incomplete watermark display
 4. SSL self-signed certificate access issues - Fixed compatibility with self-signed certificates
+5. Fixed archive-contained Office files that could stay stuck on loading because repeated extraction appended to existing files
+6. Default Office preview now prefers PDF mode, and PDF preview opens with the thumbnail sidebar visible by default
+7. Updated startup scripts to discover the packaged jar dynamically instead of relying on stale hard-coded jar names
+8. Updated Docker and release helper docs to align with the 5.0.0 release line
 
 #### Updates
 1. JDK version requirement - Mandatory requirement for JDK 21 or higher
